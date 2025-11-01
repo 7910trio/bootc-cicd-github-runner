@@ -14,6 +14,7 @@ env:
   AWS_REGION: ap-northeast-2
   AWS_BUCKET: sy-bootc-import-bucket
   AMI_NAME_PREFIX: sy-bootc-httpd-ami
+  AWS_OUTPUT_FORMAT: json
 
 jobs:
   build-and-ami:
@@ -23,6 +24,35 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ----------------------------
+      # 필수 도구 설치
+      # ----------------------------
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y podman unzip curl jq btrfs-progs
+
+      - name: Install AWS CLI v2
+        run: |
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install
+          aws --version
+
+      - name: Configure AWS CLI
+        run: |
+          mkdir -p ~/.aws
+          echo "[default]" > ~/.aws/credentials
+          echo "aws_access_key_id = ${{ secrets.AWS_ACCESS_KEY_ID }}" >> ~/.aws/credentials
+          echo "aws_secret_access_key = ${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> ~/.aws/credentials
+          echo "[default]" > ~/.aws/config
+          echo "region = $AWS_REGION" >> ~/.aws/config
+          echo "output = $AWS_OUTPUT_FORMAT" >> ~/.aws/config
+
+
+      # ----------------------------
+      # 이미지 태그 설정
+      # ----------------------------
       - name: Set image tag (commit-based)
         id: vars
         run: |
@@ -31,6 +61,9 @@ jobs:
           echo "FULL_IMAGE=${REGISTRY}/${IMAGE_NAME}:${SHORT_SHA}" >> $GITHUB_ENV
           echo "AMI_NAME=${AMI_NAME_PREFIX}-${SHORT_SHA}" >> $GITHUB_ENV
 
+      # ----------------------------
+      # Quay.io 로그인 및 이미지 빌드
+      # ----------------------------
       - name: Login to Quay.io
         run: |
           podman login $REGISTRY \
@@ -44,7 +77,10 @@ jobs:
       - name: Push image (commit-tag)
         run: |
           podman push "$FULL_IMAGE"
-      
+
+      # ----------------------------
+      # BootC AMI 생성
+      # ----------------------------
       - name: Pull container image locally for BootC
         run: |
           sudo podman pull "$FULL_IMAGE"
